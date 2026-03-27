@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/components/ui/toast";
 import { useSession } from "next-auth/react";
-import { Linkedin, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
+import { Linkedin, Sparkles, User, ToggleLeft, ToggleRight } from "lucide-react";
 
 interface ProspectData {
   name: string;
@@ -42,8 +42,19 @@ export default function ComposePage() {
   const { data: session } = useSession();
   const { addToast } = useToast();
 
-  // Form state
+  // Mode toggle
+  const [manualMode, setManualMode] = useState(false);
+
+  // LinkedIn mode
   const [linkedinUrl, setLinkedinUrl] = useState("");
+
+  // Manual mode fields
+  const [manualName, setManualName] = useState("");
+  const [manualEmail, setManualEmail] = useState("");
+  const [manualTitle, setManualTitle] = useState("");
+  const [manualCompany, setManualCompany] = useState("");
+
+  // Selectors
   const [tone, setTone] = useState("Direct");
   const [goal, setGoal] = useState("Book a demo");
 
@@ -60,54 +71,77 @@ export default function ComposePage() {
   const [sent, setSent] = useState(false);
   const [loadingFollowUps, setLoadingFollowUps] = useState(false);
 
-  // UI state
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [step, setStep] = useState<"form" | "result">("form");
-
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!linkedinUrl.includes("linkedin.com")) {
-      addToast("Please enter a valid LinkedIn URL", "error");
-      return;
-    }
-
-    setLookingUp(true);
     setProspect(null);
     setGeneratedEmail(null);
     setFollowUps([]);
     setSent(false);
     setSavedEmailId(null);
 
-    try {
-      // Step 1: Apollo lookup
-      const apolloRes = await fetch("/api/apollo/lookup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ linkedinUrl }),
-      });
+    let prospectData: ProspectData;
 
-      const apolloData = await apolloRes.json();
-
-      if (!apolloRes.ok) {
-        addToast(apolloData.error || "Failed to lookup prospect", "error");
-        setLookingUp(false);
+    if (manualMode) {
+      // Skip Apollo — use manually entered data
+      if (!manualName || !manualEmail) {
+        addToast("Name and email are required", "error");
+        return;
+      }
+      prospectData = {
+        name: manualName,
+        email: manualEmail,
+        phone: null,
+        title: manualTitle || null,
+        company: manualCompany || null,
+        linkedinUrl: linkedinUrl || null,
+        headline: null,
+      };
+      setProspect(prospectData);
+    } else {
+      // Apollo lookup mode
+      if (!linkedinUrl.includes("linkedin.com")) {
+        addToast("Please enter a valid LinkedIn URL", "error");
         return;
       }
 
-      setProspect(apolloData.prospect);
-      setLookingUp(false);
-      setGenerating(true);
+      setLookingUp(true);
+      try {
+        const apolloRes = await fetch("/api/apollo/lookup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ linkedinUrl }),
+        });
 
-      // Step 2: Generate email
+        const apolloData = await apolloRes.json();
+
+        if (!apolloRes.ok) {
+          addToast(apolloData.error || "Apollo lookup failed — try Manual Mode instead", "error");
+          setLookingUp(false);
+          return;
+        }
+
+        prospectData = apolloData.prospect;
+        setProspect(prospectData);
+      } catch (err) {
+        addToast("Apollo lookup failed — try Manual Mode", "error");
+        setLookingUp(false);
+        return;
+      }
+      setLookingUp(false);
+    }
+
+    // Generate email with Claude
+    setGenerating(true);
+    try {
       const genRes = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          linkedinUrl,
+          linkedinUrl: linkedinUrl || `manual:${manualName}`,
           tone,
           goal,
-          prospectData: apolloData.prospect,
+          prospectData,
           userName: session?.user?.name,
         }),
       });
@@ -116,33 +150,24 @@ export default function ComposePage() {
 
       if (!genRes.ok) {
         addToast(genData.error || "Failed to generate email", "error");
-        setGenerating(false);
         return;
       }
 
       setGeneratedEmail(genData.email);
-      setStep("result");
     } catch (err) {
       addToast("Something went wrong. Please try again.", "error");
     } finally {
-      setLookingUp(false);
       setGenerating(false);
     }
   };
 
   const handleSend = async () => {
     if (!generatedEmail || !prospect?.email) {
-      addToast(
-        prospect?.email
-          ? "No email to send"
-          : "No email address found for this prospect",
-        "error"
-      );
+      addToast("No prospect email address found", "error");
       return;
     }
 
     setSending(true);
-
     try {
       const res = await fetch("/api/send", {
         method: "POST",
@@ -181,7 +206,6 @@ export default function ComposePage() {
     if (!generatedEmail || !prospect) return;
 
     setLoadingFollowUps(true);
-
     try {
       const res = await fetch("/api/followup", {
         method: "POST",
@@ -223,46 +247,119 @@ export default function ComposePage() {
       <Topbar title="Compose" />
       <div className="flex-1 p-6">
         <div className="max-w-2xl mx-auto space-y-6">
-          {/* Form */}
           <form onSubmit={handleGenerate} className="space-y-6">
-            {/* LinkedIn URL */}
+
+            {/* Mode Toggle */}
             <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6 space-y-4">
-              <div>
-                <h2 className="text-base font-semibold text-[#e2e8f0] mb-1">
-                  Prospect LinkedIn URL
-                </h2>
-                <p className="text-sm text-[#475569]">
-                  We&apos;ll enrich the prospect data via Apollo.io and personalize
-                  with Claude AI.
-                </p>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-[#e2e8f0]">
+                    Prospect Info
+                  </h2>
+                  <p className="text-sm text-[#475569] mt-0.5">
+                    {manualMode
+                      ? "Enter prospect details manually"
+                      : "Auto-enrich via Apollo.io"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setManualMode(!manualMode)}
+                  className="flex items-center gap-2 text-xs font-medium px-3 py-1.5 rounded-lg border border-[#1a2d4a] hover:border-[#2563eb]/50 text-[#94a3b8] hover:text-[#e2e8f0] transition-all"
+                >
+                  {manualMode ? (
+                    <><ToggleRight className="h-4 w-4 text-[#2563eb]" /> Manual Mode</>
+                  ) : (
+                    <><ToggleLeft className="h-4 w-4 text-[#475569]" /> Apollo Mode</>
+                  )}
+                </button>
               </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="linkedin">LinkedIn Profile URL</Label>
-                <div className="relative">
-                  <Linkedin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
-                  <Input
-                    id="linkedin"
-                    type="url"
-                    placeholder="https://linkedin.com/in/username"
-                    value={linkedinUrl}
-                    onChange={(e) => setLinkedinUrl(e.target.value)}
-                    required
-                    className="pl-10"
-                  />
+              {!manualMode ? (
+                /* Apollo Mode */
+                <div className="space-y-1.5">
+                  <Label htmlFor="linkedin">LinkedIn Profile URL</Label>
+                  <div className="relative">
+                    <Linkedin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
+                    <Input
+                      id="linkedin"
+                      type="url"
+                      placeholder="https://linkedin.com/in/username"
+                      value={linkedinUrl}
+                      onChange={(e) => setLinkedinUrl(e.target.value)}
+                      required
+                      className="pl-10"
+                    />
+                  </div>
                 </div>
-              </div>
+              ) : (
+                /* Manual Mode */
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="m-name">Full Name *</Label>
+                      <Input
+                        id="m-name"
+                        placeholder="John Smith"
+                        value={manualName}
+                        onChange={(e) => setManualName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="m-email">Email *</Label>
+                      <Input
+                        id="m-email"
+                        type="email"
+                        placeholder="john@company.com"
+                        value={manualEmail}
+                        onChange={(e) => setManualEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="m-title">Job Title</Label>
+                      <Input
+                        id="m-title"
+                        placeholder="VP of Sales"
+                        value={manualTitle}
+                        onChange={(e) => setManualTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="m-company">Company</Label>
+                      <Input
+                        id="m-company"
+                        placeholder="Acme Inc"
+                        value={manualCompany}
+                        onChange={(e) => setManualCompany(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="m-linkedin">LinkedIn URL (optional)</Label>
+                    <div className="relative">
+                      <Linkedin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[#475569]" />
+                      <Input
+                        id="m-linkedin"
+                        placeholder="https://linkedin.com/in/username"
+                        value={linkedinUrl}
+                        onChange={(e) => setLinkedinUrl(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Tone */}
             <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6 space-y-4">
               <div>
-                <h2 className="text-base font-semibold text-[#e2e8f0] mb-1">
-                  Writing Tone
-                </h2>
-                <p className="text-sm text-[#475569]">
-                  How should the email sound?
-                </p>
+                <h2 className="text-base font-semibold text-[#e2e8f0] mb-1">Writing Tone</h2>
+                <p className="text-sm text-[#475569]">How should the email sound?</p>
               </div>
               <ToneSelector value={tone} onChange={setTone} />
             </div>
@@ -270,37 +367,20 @@ export default function ComposePage() {
             {/* Goal */}
             <div className="bg-[#0a1628] border border-[#1a2d4a] rounded-2xl p-6 space-y-4">
               <div>
-                <h2 className="text-base font-semibold text-[#e2e8f0] mb-1">
-                  Email Goal
-                </h2>
-                <p className="text-sm text-[#475569]">
-                  What do you want the prospect to do?
-                </p>
+                <h2 className="text-base font-semibold text-[#e2e8f0] mb-1">Email Goal</h2>
+                <p className="text-sm text-[#475569]">What do you want the prospect to do?</p>
               </div>
               <GoalSelector value={goal} onChange={setGoal} />
             </div>
 
             {/* Submit */}
-            <Button
-              type="submit"
-              disabled={isLoading}
-              className="w-full"
-              size="lg"
-            >
+            <Button type="submit" disabled={isLoading} className="w-full" size="lg">
               {lookingUp ? (
-                <>
-                  <span className="animate-pulse">Looking up prospect...</span>
-                </>
+                <span className="animate-pulse">Looking up prospect...</span>
               ) : generating ? (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2 animate-spin" />
-                  Generating email with Claude AI...
-                </>
+                <><Sparkles className="h-4 w-4 mr-2 animate-spin" />Generating with Claude AI...</>
               ) : (
-                <>
-                  <Sparkles className="h-4 w-4 mr-2" />
-                  Generate Email
-                </>
+                <><Sparkles className="h-4 w-4 mr-2" />Generate Email</>
               )}
             </Button>
           </form>
@@ -308,9 +388,7 @@ export default function ComposePage() {
           {/* Prospect Card */}
           {(lookingUp || prospect) && (
             <div className="space-y-2">
-              <h3 className="text-sm font-medium text-[#475569] uppercase tracking-wider">
-                Prospect
-              </h3>
+              <h3 className="text-sm font-medium text-[#475569] uppercase tracking-wider">Prospect</h3>
               <ProspectCard prospect={prospect} loading={lookingUp} />
             </div>
           )}
@@ -318,9 +396,7 @@ export default function ComposePage() {
           {/* Email Result */}
           {(generating || generatedEmail) && (
             <div className="space-y-2">
-              <h3 className="text-sm font-medium text-[#475569] uppercase tracking-wider">
-                Generated Email
-              </h3>
+              <h3 className="text-sm font-medium text-[#475569] uppercase tracking-wider">Generated Email</h3>
               <EmailResult
                 email={generatedEmail}
                 loading={generating}
