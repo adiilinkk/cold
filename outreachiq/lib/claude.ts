@@ -39,39 +39,34 @@ const GOAL_DESCRIPTIONS: Record<string, string> = {
   "Partnership pitch": "propose a mutually beneficial collaboration",
 };
 
-async function callGemini(prompt: string, systemPrompt: string): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Gemini API key not configured");
+async function callGroq(prompt: string, systemPrompt: string): Promise<string> {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) throw new Error("Groq API key not configured");
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: {
-          parts: [{ text: systemPrompt }],
-        },
-        contents: [
-          {
-            parts: [{ text: prompt }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1024,
-        },
-      }),
-    }
-  );
+  const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 1024,
+    }),
+  });
 
   if (!response.ok) {
     const error = await response.text();
-    throw new Error(`Gemini API error: ${response.status} - ${error}`);
+    throw new Error(`Groq API error: ${response.status} - ${error}`);
   }
 
   const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return data.choices?.[0]?.message?.content || "";
 }
 
 export async function generateColdEmail(
@@ -116,7 +111,7 @@ reply_estimate = estimated reply rate percentage`;
 
 Make it feel hyper-personalized based on their role and company.`;
 
-  const text = await callGemini(userPrompt, systemPrompt);
+  const text = await callGroq(userPrompt, systemPrompt);
   const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
   try {
@@ -148,7 +143,7 @@ export async function generateFollowUpSequence(
 ): Promise<FollowUpEmail[]> {
   const systemPrompt = `You are an expert at writing cold email follow-up sequences.
 Write Day 3 and Day 7 follow-ups that are short (2-3 sentences), add new value, and are progressively more direct.
-Respond with valid JSON only:
+Respond with valid JSON only, no markdown, no code blocks:
 {
   "followups": [
     { "day": 3, "subject": "Re: original subject", "body": "follow up body" },
@@ -165,7 +160,7 @@ From: ${senderName}
 
 Generate Day 3 and Day 7 follow-ups.`;
 
-  const text = await callGemini(userPrompt, systemPrompt);
+  const text = await callGroq(userPrompt, systemPrompt);
   const cleaned = text.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
   try {
