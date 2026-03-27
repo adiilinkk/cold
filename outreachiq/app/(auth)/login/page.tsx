@@ -29,9 +29,9 @@ export default function LoginPage() {
         redirect: false,
       });
 
-      if (result?.error) {
-        addToast(result.error || "Invalid credentials", "error");
-      } else {
+      if (!result || result.error) {
+        addToast("Invalid email or password", "error");
+      } else if (result.ok) {
         addToast("Welcome back!", "success");
         router.push("/dashboard");
         router.refresh();

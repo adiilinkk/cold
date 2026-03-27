@@ -51,8 +51,9 @@ export default function RegisterPage() {
         redirect: false,
       });
 
-      if (result?.error) {
-        addToast("Account created. Please sign in.", "success");
+      if (!result || result.error) {
+        // Account created but auto-login failed — redirect to login
+        addToast("Account created! Please sign in.", "success");
         router.push("/login");
       } else {
         addToast("Account created! Welcome to OutreachIQ.", "success");
