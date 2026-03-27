@@ -1,0 +1,119 @@
+// This is your Prisma schema file
+// Learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  name           String?
+  email          String   @unique
+  password       String?
+  apolloKey      String?
+  resendKey      String?
+  gmailConnected Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  emails   GeneratedEmail[]
+  sessions Session[]
+  accounts Account[]
+
+  @@map("users")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model GeneratedEmail {
+  id               String    @id @default(cuid())
+  userId           String
+  prospectName     String
+  prospectEmail    String
+  prospectTitle    String?
+  prospectCompany  String?
+  prospectPhone    String?
+  linkedinUrl      String?
+  tone             String?
+  goal             String?
+  subject          String
+  body             String    @db.Text
+  hooks            String[]
+  personalizationScore Int?
+  openEstimate     String?
+  replyEstimate    String?
+  status           EmailStatus @default(SENT)
+  sentAt           DateTime  @default(now())
+  createdAt        DateTime  @default(now())
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  followUps FollowUp[]
+
+  @@map("generated_emails")
+}
+
+model FollowUp {
+  id        String   @id @default(cuid())
+  emailId   String
+  day       Int
+  subject   String
+  body      String   @db.Text
+  sent      Boolean  @default(false)
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+
+  email GeneratedEmail @relation(fields: [emailId], references: [id], onDelete: Cascade)
+
+  @@map("follow_ups")
+}
+
+enum EmailStatus {
+  SENT
+  OPENED
+  REPLIED
+  BOUNCED
+  DRAFT
+}
