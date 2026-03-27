@@ -25,9 +25,9 @@ export async function lookupProspect(
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-cache",
+      "X-Api-Key": key,
     },
     body: JSON.stringify({
-      api_key: key,
       linkedin_url: linkedinUrl,
       reveal_personal_emails: true,
       reveal_phone_number: true,
